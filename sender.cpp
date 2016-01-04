@@ -102,8 +102,7 @@ int main(int argc, char **argv) {
   radio.setPALevel(RF24_PA_MIN);
   radio.setDataRate(RF24_250KBPS);
   //radio.setAutoAck(1); // Ensure autoACK is enabled
-  radio.setRetries(
-      15, 15); // Optionally, increase the delay between retries & # of retries
+  radio.setRetries(15,15)
   radio.setCRCLength(RF24_CRC_16); // Use 8-bit CRC for performance
   radio.printDetails();
 
