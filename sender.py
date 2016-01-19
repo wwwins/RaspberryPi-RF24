@@ -45,6 +45,7 @@ def setup():
   radio.setPALevel(RF24_PA_MIN);
   radio.setDataRate(RF24_250KBPS);
   radio.setCRCLength(RF24_CRC_16);
+  radio.setAutoAck(1)
   #radio.enableDynamicPayloads()
   radio.setRetries(15,15)
   radio.printDetails()
