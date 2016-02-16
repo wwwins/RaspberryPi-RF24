@@ -148,7 +148,7 @@ int main(int argc, char** argv) {
                 fdmax = newfd;
             }
             printf("selectserver: new connection from %s on socket %d\n",inet_ntop(remoteaddr.ss_family,get_in_addr((struct sockaddr*)&remoteaddr),remoteIP, INET6_ADDRSTRLEN),newfd);
-            if (send(newfd, version, strlen(version), 0) -1) {
+            if (send(newfd, version, strlen(version), 0) == -1) {
               perror("send");
             }
           }
