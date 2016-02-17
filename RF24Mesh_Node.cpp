@@ -19,6 +19,15 @@
 #include <RF24/RF24.h>
 #include <RF24Network/RF24Network.h>
 
+// Set the nodeID to 0 for the master node
+#define NODE_ID 1
+
+#if NODE_ID > 0
+#define HOST "localhost"
+#else
+#define HOST NULL
+#endif
+
 #define PORT "8888"
 #define MAX_BUFFER_SIZE 255
 
@@ -71,7 +80,7 @@ int main(int argc, char** argv) {
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
   hints.ai_flags = AI_PASSIVE;
-  if ((rv = getaddrinfo(NULL, PORT, &hints, &ai)) != 0) {
+  if ((rv = getaddrinfo(HOST, PORT, &hints, &ai)) != 0) {
     fprintf(stderr, "selectserver: %s\n", gai_strerror(rv));
     exit(1);
   }
@@ -116,7 +125,7 @@ int main(int argc, char** argv) {
 
   /////////////////////////////////////////////////////
   // Set the nodeID to 0 for the master node
-  mesh.setNodeID(1);
+  mesh.setNodeID(NODE_ID);
   // Connect to the mesh
   printf("start nodeID %d\n",mesh.getNodeID());
   mesh.begin();
