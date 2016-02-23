@@ -32,6 +32,7 @@
 #include <cstring>
 #include <iostream>
 #include <ncurses.h>
+#include <vector>
 
 #include <unistd.h>
 #include <sys/types.h>
@@ -67,7 +68,13 @@ uint8_t nodeCounter;
 uint16_t failID = 0;
 
 // ping node status values
-uint8_t pingValues[MAX_BUFFER_SIZE];
+uint8_t connected[MAX_BUFFER_SIZE];
+struct payload_node {
+  uint8_t nodeID;
+  uint8_t major;
+  uint8_t minor;
+  float distance;
+};
 
 int main()
 {
@@ -149,7 +156,14 @@ int main()
   /////////////////////////////////////////////////////
 
   // init ping status values
-  memset(pingValues,0,MAX_BUFFER_SIZE);
+  memset(connected,0,MAX_BUFFER_SIZE);
+  // init vector container
+  vector<payload_node> vectorContainer(32);
+  char buf_nodeID[32];
+  char buf_major[32];
+  char buf_minor[32];
+  char buf_distance[32];
+
   // title for output
   uint8_t yCoord = 19;
 
@@ -226,8 +240,52 @@ int main()
             if (strncmp(buf,"INFO",4)==0) {
               int length = 0;
               for(uint8_t j=0; j<mesh.addrListTop; j++){
-                // format: nodeID address pingValues
-                length += bytes_added(sprintf(output+length, "%d 0%o %d\n",mesh.addrList[j].nodeID,mesh.addrList[j].address,pingValues[j]));
+                // format: nodeID address connected
+                length += bytes_added(sprintf(output+length, "%d 0%o %d\n",mesh.addrList[j].nodeID,mesh.addrList[j].address,connected[j]));
+              }
+            }
+            // DIST nodeID Major Minor Distance
+            else if (strncmp(buf,"DIST",4)==0) {
+              uint8_t idx = 0;
+              const char delim[] = " ";
+              char *token;
+              token = strtok(buf, delim);
+              // parsing char array
+              while( token != NULL ) {
+                if (idx==1) strcpy(buf_nodeID,token);
+                if (idx==2) strcpy(buf_major,token);
+                if (idx==3) strcpy(buf_minor,token);
+                if (idx==4) strcpy(buf_distance,token);
+                idx++;
+                token = strtok(NULL, delim);
+              }
+              payload_node obj;
+              bool updated = false;
+              obj.nodeID = (uint8_t)atoi(buf_nodeID);
+              obj.major = (uint8_t)atoi(buf_major);
+              obj.minor = (uint8_t)atoi(buf_minor);
+              obj.distance = (float)atof(buf_distance);
+              if (obj.nodeID > 0) {
+                for (size_t n = 0; n < vectorContainer.size(); n++) {
+                  if (vectorContainer[n].nodeID==obj.nodeID) {
+                    vectorContainer[n].nodeID = obj.nodeID;
+                    vectorContainer[n].major = obj.major;
+                    vectorContainer[n].minor = obj.minor;
+                    vectorContainer[n].distance = obj.distance;
+                    updated = true;
+                  }
+                }
+                if (!updated) {
+                  vectorContainer.push_back(obj);
+                }
+              }
+            }
+            else if (strncmp(buf,"DUMP",4)==0) {
+              // print all
+              for (size_t n = 0; n < vectorContainer.size(); n++) {
+                if (vectorContainer[n].nodeID > 0) {
+                  mvprintw(yCoord++,0,"nodeID:%d, major:%d, minor:%d, distanc:%f\n",vectorContainer[n].nodeID,vectorContainer[n].major,vectorContainer[n].minor,vectorContainer[n].distance);
+                }
               }
             }
             else {
@@ -302,7 +360,7 @@ int main()
       if(  nodeCounter == mesh.addrListTop){ // if(mesh.addrMap.size() > 1){ it=mesh.addrMap.begin(); } continue;}
         nodeCounter = 0;
       }
-      pingValues[nodeCounter] = pingNode(nodeCounter);
+      connected[nodeCounter] = pingNode(nodeCounter);
       nodeCounter++;
     }
 
