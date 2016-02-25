@@ -46,6 +46,7 @@
 #include <RF24/RF24.h>
 #include <RF24Network/RF24Network.h>
 
+//#define DEBUG_SOCKET
 #define PORT "8888"
 #define MAX_BUFFER_SIZE 255
 
@@ -64,17 +65,18 @@ void *get_in_addr(struct sockaddr *sa);
 int bytes_added( int result_of_sprintf );
 
 uint8_t nodeCounter;
-
 uint16_t failID = 0;
 
 // ping node status values
 uint8_t connected[MAX_BUFFER_SIZE];
-struct payload_node {
-  uint8_t nodeID;
+struct payload_beacon {
+  int8_t nodeID;
   uint8_t major;
   uint8_t minor;
   float distance;
 };
+// find vector container nodeID
+int8_t findNodeID(vector<payload_beacon>& vectorContainer,int8_t nodeID);
 
 int main()
 {
@@ -113,7 +115,9 @@ int main()
   hints.ai_socktype = SOCK_STREAM;
   hints.ai_flags = AI_PASSIVE;
   if ((rv = getaddrinfo(NULL, PORT, &hints, &ai)) != 0) {
+    #if DEBUG_SOCKET
     fprintf(stderr, "selectserver: %s\n", gai_strerror(rv));
+    #endif
     exit(1);
   }
 
@@ -158,11 +162,15 @@ int main()
   // init ping status values
   memset(connected,0,MAX_BUFFER_SIZE);
   // init vector container
-  vector<payload_node> vectorContainer(32);
+  vector<payload_beacon> vectorContainer(32);
+  for (size_t n = 0; n < vectorContainer.size(); n++) {
+    vectorContainer[n].nodeID = -1;
+  }
   char buf_nodeID[32];
   char buf_major[32];
   char buf_minor[32];
   char buf_distance[32];
+  char *pChar[] = {buf_nodeID,buf_major,buf_minor,buf_distance};
 
   // title for output
   uint8_t yCoord = 19;
@@ -214,7 +222,9 @@ int main()
             if (newfd > fdmax) {    // keep track of the max
                 fdmax = newfd;
             }
+            #if DEBUG_SOCKET
             mvprintw(yCoord++,0,"selectserver: new connection from %s on socket %d\n",inet_ntop(remoteaddr.ss_family,get_in_addr((struct sockaddr*)&remoteaddr),remoteIP, INET6_ADDRSTRLEN),newfd);
+            #endif
             if (send(newfd, version, strlen(version), 0) == -1) {
               perror("send");
             }
@@ -225,7 +235,9 @@ int main()
             // got error or connection closed by client
             if (nbytes == 0) {
               // connection closed
+              #if DEBUG_SOCKET
               mvprintw(yCoord++,0,"selectserver: socket %d hung up\n", i);
+              #endif
             } else {
               perror("recv");
             }
@@ -234,15 +246,21 @@ int main()
           } else {
             // send back
             buf[nbytes] = '\0';
+            #if DEBUG_SOCKET
             mvprintw(yCoord++,0,"Received: %s\n",buf);
+            #endif
             char output[MAX_BUFFER_SIZE] = "Echo:";
             // if (strcmp(buf,"INFO\n")==0) {
             if (strncmp(buf,"INFO",4)==0) {
               int length = 0;
-              for(uint8_t j=0; j<mesh.addrListTop; j++){
-                // format: nodeID address connected
-                length += bytes_added(sprintf(output+length, "%d 0%o %d\n",mesh.addrList[j].nodeID,mesh.addrList[j].address,connected[j]));
+              int at;
+              for(uint8_t j=0; j<mesh.addrListTop; j++) {
+                at = findNodeID(vectorContainer, mesh.addrList[j].nodeID);
+                // format: nodeID address connected distance
+                length += bytes_added(sprintf(output+length, "%d 0%o %d %f\n",mesh.addrList[j].nodeID,mesh.addrList[j].address,connected[j],at < 0 ? 0.0 : vectorContainer[at].distance));
               }
+              at = findNodeID(vectorContainer,0);
+              length += bytes_added(sprintf(output+length, "0 00 1 %f\n",(at < 0 ? 0.0 :vectorContainer[at].distance)));
             }
             // DIST nodeID Major Minor Distance
             else if (strncmp(buf,"DIST",4)==0) {
@@ -252,23 +270,19 @@ int main()
               token = strtok(buf, delim);
               // parsing char array
               while( token != NULL ) {
-                if (idx==1) strcpy(buf_nodeID,token);
-                if (idx==2) strcpy(buf_major,token);
-                if (idx==3) strcpy(buf_minor,token);
-                if (idx==4) strcpy(buf_distance,token);
+                if (idx>0) strcpy(pChar[idx-1],token);
                 idx++;
                 token = strtok(NULL, delim);
               }
-              payload_node obj;
+              payload_beacon obj;
               bool updated = false;
-              obj.nodeID = (uint8_t)atoi(buf_nodeID);
-              obj.major = (uint8_t)atoi(buf_major);
-              obj.minor = (uint8_t)atoi(buf_minor);
-              obj.distance = (float)atof(buf_distance);
-              if (obj.nodeID > 0) {
+              obj.nodeID = (uint8_t)atoi(pChar[0]);
+              obj.major = (uint8_t)atoi(pChar[1]);
+              obj.minor = (uint8_t)atoi(pChar[2]);
+              obj.distance = (float)atof(pChar[3]);
+              if (obj.nodeID > -1) {
                 for (size_t n = 0; n < vectorContainer.size(); n++) {
                   if (vectorContainer[n].nodeID==obj.nodeID) {
-                    vectorContainer[n].nodeID = obj.nodeID;
                     vectorContainer[n].major = obj.major;
                     vectorContainer[n].minor = obj.minor;
                     vectorContainer[n].distance = obj.distance;
@@ -283,7 +297,7 @@ int main()
             else if (strncmp(buf,"DUMP",4)==0) {
               // print all
               for (size_t n = 0; n < vectorContainer.size(); n++) {
-                if (vectorContainer[n].nodeID > 0) {
+                if (vectorContainer[n].nodeID > -1) {
                   mvprintw(yCoord++,0,"nodeID:%d, major:%d, minor:%d, distanc:%f\n",vectorContainer[n].nodeID,vectorContainer[n].major,vectorContainer[n].minor,vectorContainer[n].distance);
                 }
               }
@@ -326,11 +340,30 @@ int main()
       mvprintw(3,0,"[Last Payload Info]\n");
       attroff(A_BOLD | COLOR_PAIR(1));
 
-      // Read the network payload
-      network.read(header,0,0);
-
-      // Display the header info
-      mvprintw(4,0," HeaderID: %u  \n Type: %d  \n From: 0%o  \n ",header.id,header.type,header.from_node);
+      bool updated = false;
+      payload_beacon payload;
+      switch(header.type) {
+        // Display the incoming millis() values from the sensor nodes
+        case 'B': network.read(header,&payload,sizeof(payload));
+                  if (payload.nodeID > -1) {
+                    for (size_t n = 0; n < vectorContainer.size(); n++) {
+                      if (vectorContainer[n].nodeID==payload.nodeID) {
+                        vectorContainer[n].major = payload.major;
+                        vectorContainer[n].minor = payload.minor;
+                        vectorContainer[n].distance = payload.distance;
+                        updated = true;
+                      }
+                    }
+                    if (!updated) {
+                      vectorContainer.push_back(payload);
+                    }
+                  }
+                  break;
+        // Read the network payload
+        default:  network.read(header,0,0);
+                  mvprintw(4,0," HeaderID: %u  \n Type: %d  \n From: 0%o  \n ",header.id,header.type,header.from_node);
+                  break;
+      }
 
       //refresh();
       //for (std::map<char,uint16_t>::iterator _it=mesh.addrMap.begin(); _it!=mesh.addrMap.end(); _it++){
@@ -488,4 +521,14 @@ void *get_in_addr(struct sockaddr *sa) {
 
 int bytes_added( int result_of_sprintf ) {
     return (result_of_sprintf > 0) ? result_of_sprintf : 0;
+}
+
+int8_t findNodeID(vector<payload_beacon>& vectorContainer,int8_t nodeID) {
+  int at = -1;
+  for (size_t n = 0; n < vectorContainer.size(); n++) {
+    if (vectorContainer[n].nodeID==nodeID) {
+      at = n;
+    }
+  }
+  return at;
 }
