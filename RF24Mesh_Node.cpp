@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <vector>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -18,6 +19,8 @@
 #include "RF24Mesh/RF24Mesh.h"
 #include <RF24/RF24.h>
 #include <RF24Network/RF24Network.h>
+
+using namespace std;
 
 // Set the nodeID to 0 for the master node
 #define NODE_ID 1
@@ -32,6 +35,7 @@
 #define MAX_BUFFER_SIZE 255
 
 void *get_in_addr(struct sockaddr *sa);
+void sendBeacon(uint16_t to_node,uint8_t nodeID, uint8_t major, uint8_t minor, float distance);
 
 RF24 radio(RPI_V2_GPIO_P1_15, BCM2835_SPI_CS0, BCM2835_SPI_SPEED_8MHZ);
 RF24Network network(radio);
@@ -42,6 +46,13 @@ uint32_t displayTimer=0;
 struct payload_t {
   unsigned long ms;
   unsigned long counter;
+};
+
+struct payload_beacon {
+  uint8_t nodeID;
+  uint8_t major;
+  uint8_t minor;
+  float distance;
 };
 
 int main(int argc, char** argv) {
@@ -132,6 +143,16 @@ int main(int argc, char** argv) {
   radio.printDetails();
   /////////////////////////////////////////////////////
 
+  /////////////////////////////////////////////////////
+  // init vector container
+  vector<payload_beacon> vectorContainer(32);
+  char buf_nodeID[32];
+  char buf_major[32];
+  char buf_minor[32];
+  char buf_distance[32];
+  char *pChar[] = {buf_nodeID,buf_major,buf_minor,buf_distance};
+  /////////////////////////////////////////////////////
+
   while(1) {
     /////////////////////////////////////////////////////
     // simple server main loop
@@ -178,7 +199,25 @@ int main(int argc, char** argv) {
             buf[nbytes] = '\0';
             printf("Received: %s\n",buf);
             char output[512] = "Echo:";
-            strcat(output,buf);
+            // format: DIST nodeID Major Minor Distance
+            if (strncmp(buf,"DIST",4)==0) {
+              uint8_t idx = 0;
+              const char delim[] = " ";
+              char *token;
+              token = strtok(buf, delim);
+              // parsing char array
+              while( token != NULL ) {
+                if (idx>0) strcpy(pChar[idx-1],token);
+                idx++;
+                token = strtok(NULL, delim);
+              }
+              if (atoi(pChar[0])>0) {
+                sendBeacon(0,(uint8_t)atoi(pChar[0]),(uint8_t)atoi(pChar[1]),(uint8_t)atoi(pChar[2]),(float)atof(pChar[3]));
+              }
+            }
+            else {
+              strcat(output,buf);
+            }
             if (send(i,output, strlen(output), 0) == -1) {
               perror("send");
             }
@@ -237,6 +276,19 @@ int main(int argc, char** argv) {
   }
 
   return 0;
+}
+
+void sendBeacon(uint16_t to_node,uint8_t nodeID, uint8_t major, uint8_t minor, float distance) {
+  payload_beacon payload = { nodeID,major,minor,distance };
+  // setting beacon header type = B
+  RF24NetworkHeader header(to_node,'B');
+  bool ok = network.write(header,&payload,sizeof(payload));
+  if (ok) {
+    printf("Success: Send Beacon Data to 0%o.\n", to_node);
+  }
+  else {
+    printf("Fail: Send Beacon Data to 0%o.\n", to_node);
+  }
 }
 
 // get sockaddr, IPv4 or IPv6:
